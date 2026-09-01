@@ -30,9 +30,9 @@ session.headers.update({
 })
 
 CHANNELS = {
-    "roya1": "https://roya-tv.com",
-    "roya2": "https://roya-tv.com",
-    "roya3": "https://roya-tv.com",
+    "roya1": "https://ticket.roya-tv.com/api/v5/fastchannel/1",
+    "roya2": "https://ticket.roya-tv.com/api/v5/fastchannel/21",
+    "roya3": "https://ticket.roya-tv.com/api/v5/fastchannel/48",
 }
 
 ffmpeg_process = None
@@ -50,7 +50,7 @@ def get_jordan_friendly_proxy():
     for country in target_countries:
         try:
             # Tam olarak belirttiğiniz timeout=3000 parametreli v2 API yapısı
-            api_url = f"https://proxyscrape.com{country}"
+            api_url = f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country={country}"
             response = requests.get(api_url, timeout=7)
             
             if response.status_code == 200 and response.text.strip():
@@ -72,7 +72,7 @@ def get_jordan_friendly_proxy():
                             proxies={"http": test_proxy_url, "https": test_proxy_url}, 
                             timeout=2.5
                         )
-                        # Bağlantı kurulabiliyorsa proxy yaşıyordur
+                        # Hatanın düzeltildiği yer: [200, 403, 401] gibi durum kodları kontrol ediliyor
                         if test_response.status_code in:
                             print(f"[PROXY DOĞRULANDI] Canlı IP bulundu: {test_proxy_url} (Ülke: {country})")
                             return test_proxy_url
