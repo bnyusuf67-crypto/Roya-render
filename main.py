@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-HLS_DIR = "/app/platforms/links"
+HLS_DIR = "/app/links"
 os.makedirs(HLS_DIR, exist_ok=True)
 app.mount("/live", StaticFiles(directory=HLS_DIR), name="live")
 
@@ -30,9 +30,9 @@ session.headers.update({
 })
 
 CHANNELS = {
-    "roya1": "https://roya-tv.com",
-    "roya2": "https://roya-tv.com",
-    "roya3": "https://roya-tv.com",
+    "roya1": "https://ticket.roya-tv.com/api/v5/fastchannel/1",
+    "roya2": "https://ticket.roya-tv.com/api/v5/fastchannel/21",
+    "roya3": "https://ticket.roya-tv.com/api/v5/fastchannel/48",
 }
 
 ffmpeg_process = None
