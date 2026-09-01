@@ -30,9 +30,9 @@ session.headers.update({
 })
 
 CHANNELS = {
-    "roya1": "https://ticket.roya-tv.com/api/v5/fastchannel/1",
-    "roya2": "https://ticket.roya-tv.com/api/v5/fastchannel/21",
-    "roya3": "https://ticket.roya-tv.com/api/v5/fastchannel/48",
+    "roya1": "https://roya-tv.com",
+    "roya2": "https://roya-tv.com",
+    "roya3": "https://roya-tv.com",
 }
 
 ffmpeg_process = None
@@ -42,11 +42,11 @@ token_expires_at = 0
 
 def get_jordan_friendly_proxy():
     """
-    BAE ve Mısır listesindeki timeout=3000 olan proxyleri çeker,
-    Render üzerinde gerçekten canlı/çalışan ilk proxy'yi bulana kadar test eder.
+    Öncelikle BAE ve Mısır listesini dener. Eğer buralardan canlı proxy çıkmazsa,
+    FFmpeg'in 403 almasını önlemek için küresel elite proxy havuzuna otomatik geçiş yapar.
     """
+    # 1. AŞAMA: Öncelikli Hedef Ülkeler
     target_countries = ["AE", "EG"]
-    
     for country in target_countries:
         try:
             api_url = f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country={country}"
@@ -60,7 +60,6 @@ def get_jordan_friendly_proxy():
                     raw_proxy = raw_proxy.strip()
                     if not raw_proxy:
                         continue
-                        
                     test_proxy_url = f"http://{raw_proxy}" if not raw_proxy.startswith("http") else raw_proxy
                     
                     try:
@@ -69,23 +68,47 @@ def get_jordan_friendly_proxy():
                             proxies={"http": test_proxy_url, "https": test_proxy_url}, 
                             timeout=2.5
                         )
-                        # HATA VEREN KISIM BASİTLEŞTİRİLDİ: 200 veya 403 ise proxy canlıdır
                         if test_response.status_code == 200 or test_response.status_code == 403:
                             print(f"[PROXY DOĞRULANDI] Canlı IP bulundu: {test_proxy_url} (Ülke: {country})")
                             return test_proxy_url
                     except Exception:
                         continue
-                        
         except Exception as e:
             print(f"[PROXY HATA] {country} API taranamadı: {e}")
             continue
 
-    print("[UYARI] BAE ve Mısır listelerindeki test edilen tüm proxyler yanıtsız çıktı!")
+    # 2. AŞAMA: YEDEK PLAN (Kritik 403 Engelleme Modu)
+    # BAE ve Mısır patlarsa, FFmpeg'in Render IP'siyle gidip ban yememesi için küresel havuzdan bir elite proxy seçilir
+    print("[YEDEK HAVUZ] BAE ve Mısır listeleri yetersiz. Küresel Elite Proxy havuzuna geçiliyor...")
+    try:
+        global_api_url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country={country}&ssl=yes&anonymity=elite"
+        global_response = requests.get(global_api_url, timeout=7)
+        if global_response.status_code == 200 and global_response.text.strip():
+            global_proxies = global_response.text.strip().splitlines()
+            for raw_proxy in global_proxies[:20]:
+                raw_proxy = raw_proxy.strip()
+                if not raw_proxy:
+                    continue
+                test_proxy_url = f"http://{raw_proxy}" if not raw_proxy.startswith("http") else raw_proxy
+                try:
+                    test_response = requests.get(
+                        "https://roya-tv.com", 
+                        proxies={"http": test_proxy_url, "https": test_proxy_url}, 
+                        timeout=2.5
+                    )
+                    if test_response.status_code == 200 or test_response.status_code == 403:
+                        print(f"[YEDEK PROXY DOĞRULANDI] Canlı Küresel IP: {test_proxy_url}")
+                        return test_proxy_url
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"[KÜRESEL HAVUZ HATASI] Yedek listeye ulaşılamadı: {e}")
+
+    print("[TEHLİKE] Hiçbir havuzdan canlı proxy alınamadı! Doğrudan Render IP'si kullanılacak.")
     return None
 
 
 def get_expire_time_from_url(url: str) -> float:
-    """URL içindeki exp veya expires parametresini okur ve unix timestamp döner."""
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     for param in ["exp", "expires", "token_time"]:
@@ -98,7 +121,6 @@ def get_expire_time_from_url(url: str) -> float:
 
 
 def get_single_channel_variants(api_url):
-    """Roya TV API'sinden master listeyi alır ve alt kalitelerin linklerini çözer."""
     global token_expires_at
     try:
         r = session.get(api_url, timeout=10)
@@ -107,7 +129,7 @@ def get_single_channel_variants(api_url):
 
         url_expire = get_expire_time_from_url(secured_url)
         if token_expires_at == 0 or url_expire < token_expires_at:
-            token_expires_at = url_expire - 300  # 5 dakika emniyet payı
+            token_expires_at = url_expire - 300
 
         r = session.get(secured_url, timeout=10)
         r.raise_for_status()
@@ -132,7 +154,6 @@ def get_single_channel_variants(api_url):
 
 
 def run_ffmpeg_loop():
-    """FFmpeg sürecini, zaman sayacını ve proxy döngüsünü yöneten ana motor."""
     global ffmpeg_process, active_proxy, token_expires_at
     
     while True:
@@ -156,7 +177,7 @@ def run_ffmpeg_loop():
                 track_mappings.append(track_name)
 
         if not all_active_inputs:
-            print("[SİSTEM] Varyant toplanamadı. 10 saniye sonra yeni doğrulamayla döngü başa saracak...")
+            print("[SİSTEM] Varyant toplanamadı. 10 saniye sonra döngü başa saracak...")
             time.sleep(10)
             continue
 
