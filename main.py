@@ -10,7 +10,7 @@ import requests
 
 app = FastAPI(title="Roya TV Smart FFmpeg Relay")
 
-# --- CORS AYARLARI (hls.js Hatalarını Önler) ---
+# --- CORS AYARLARI ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,9 +30,9 @@ session.headers.update({
 })
 
 CHANNELS = {
-    "roya1": "https://ticket.roya-tv.com/api/v5/fastchannel/1",
-    "roya2": "https://ticket.roya-tv.com/api/v5/fastchannel/21",
-    "roya3": "https://ticket.roya-tv.com/api/v5/fastchannel/48",
+    "roya1": "https://roya-tv.com",
+    "roya2": "https://roya-tv.com",
+    "roya3": "https://roya-tv.com",
 }
 
 ffmpeg_process = None
@@ -41,40 +41,40 @@ token_expires_at = 0
 
 
 # ==========================================
-# Geliştirilmiş ve Boş Kalmayan Proxy Motoru
+# AE VE EG ODAKLI AKTİF PROXY MOTORU
 # ==========================================
-def get_working_proxy():
+def get_jordan_friendly_proxy():
     """
-    Önce Ürdün (JO) dener. Boş dönerse Orta Doğu ülkelerini, 
-    o da boşsa genel hızlı elit proxyleri sırayla tarar.
+    Roya TV'nin açık olduğu BAE (AE) ve Mısır (EG) sayfalarını sırayla kontrol eder.
     """
-    # Denenecek ülke kombinasyonları kademeli olarak genişler
-    country_filters = ["JO", "SA,AE,EG", "all"]
+    # Sizin belirttiğiniz aktif proxy havuzuna sahip ülkeleri sırayla tarar
+    target_countries = ["AE", "EG"]
     
-    for country in country_filters:
+    for country in target_countries:
         try:
-            # İstediğiniz gibi timeout=3000 parametresi entegre edildi
-            api_url = f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country={country}&ssl=yes&anonymity=elite"
+            # Belirttiğiniz v2 API yapısı ve timeout=3000 filtresi uygulandı
+            api_url = f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country={country}"
             response = requests.get(api_url, timeout=10)
             
             if response.status_code == 200 and response.text.strip():
                 lines = response.text.strip().splitlines()
-                # Sayfada en az bir satır proxy adresi var mı?
-                if lines and len(lines[0]) > 5:
-                    proxy_address = lines[0].strip()
-                    if not proxy_address.startswith("http"):
-                        proxy_address = f"http://{proxy_address}"
-                    print(f"[PROXY BAŞARILI] Filtre: {country} -> Seçilen IP: {proxy_address}")
-                    return proxy_address
+                # Eğer listeden en az bir adet IP döndüyse
+                if lines and len(lines) > 0:
+                    proxy = lines[0].strip()  # İlk sıradaki en taze proxy'yi cımbızla
+                    if proxy:
+                        proxy_address = f"http://{proxy}" if not proxy.startswith("http") else proxy
+                        print(f"[PROXY BULUNDU] Ülke: {country} -> Seçilen IP: {proxy_address}")
+                        return proxy_address
         except Exception as e:
-            print(f"[PROXY DENEME] {country} filtresi başarısız oldu: {e}")
+            print(f"[PROXY DENEME] {country} sayfası taranamadı: {e}")
             continue
-            
-    print("[PROXY BULUNAMADI] Havuz tamamen boş. Proxy olmadan denenecek.")
+
+    print("[UYARI] BAE ve Mısır sayfaları o an boş döndü! Proxy olmadan denenecek.")
     return None
 
 
 def get_expire_time_from_url(url: str) -> float:
+    """URL içindeki exp veya expires parametresini okur ve unix timestamp döner."""
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     for param in ["exp", "expires", "token_time"]:
@@ -87,15 +87,18 @@ def get_expire_time_from_url(url: str) -> float:
 
 
 def get_single_channel_variants(api_url):
+    """Roya TV API'sinden master listeyi alır ve alt kalitelerin linklerini çözer."""
     global token_expires_at
     try:
         r = session.get(api_url, timeout=10)
         r.raise_for_status()
         secured_url = r.json()["data"]["secured_url"]
 
+        # 🧠 EXPIRE SÜRESİNİ OKUMA VE KAYDETME MECHANİSMASI
         url_expire = get_expire_time_from_url(secured_url)
         if token_expires_at == 0 or url_expire < token_expires_at:
-            token_expires_at = url_expire - 300  # 5 dakika emniyet payı
+            # Emniyet payı: Linkler patlamadan tam 5 dakika (300 sn) önce kapatıp yenilemeyi hedefler
+            token_expires_at = url_expire - 300
 
         r = session.get(secured_url, timeout=10)
         r.raise_for_status()
@@ -120,14 +123,15 @@ def get_single_channel_variants(api_url):
 
 
 def run_ffmpeg_loop():
+    """FFmpeg sürecini, zaman sayacını ve proxy döngüsünü yöneten ana motor."""
     global ffmpeg_process, active_proxy, token_expires_at
     
     while True:
         print("\n--- [YENİ PERİYOT BAŞLADI] ---")
-        token_expires_at = 0
+        token_expires_at = 0  # Önceki süreyi sıfırla
         
-        # Yedekli proxy seçici devreye giriyor (Sayfa asla boş kalmıyor)
-        active_proxy = get_working_proxy()
+        # BAE ve Mısır sayfalarından dinamik olarak proxy çekiliyor
+        active_proxy = get_jordan_friendly_proxy()
         if active_proxy:
             session.proxies = {"http": active_proxy, "https": active_proxy}
         else:
@@ -136,6 +140,7 @@ def run_ffmpeg_loop():
         all_active_inputs = []
         track_mappings = []
 
+        # Tüm kanalları proxy arkasından güvenle tarayıp doldur
         for channel_key, api_url in CHANNELS.items():
             variants = get_single_channel_variants(api_url)
             for idx, (stream_info, variant_url) in enumerate(variants):
@@ -143,14 +148,15 @@ def run_ffmpeg_loop():
                 all_active_inputs.append(variant_url)
                 track_mappings.append(track_name)
 
+        # Eğer listeler doldurulamadıysa proxy banlı veya sorunlu olabilir, 10 sn bekle ve döngüyü başa sar
         if not all_active_inputs:
-            print("[SİSTEM] Link alınamadı. 15 saniye sonra yeni proxy ile tekrar denenecek...")
-            time.sleep(15)
+            print("[SİSTEM] Varyant toplanamadı. 10 saniye sonra yeni proxy ile döngü başa saracak...")
+            time.sleep(10)
             continue
 
+        # FFmpeg komut dizisi inşası
         ffmpeg_cmd = ["ffmpeg", "-y"]
         
-        # FFmpeg girdilerine proxy ekleme aşaması
         for url in all_active_inputs:
             if active_proxy:
                 ffmpeg_cmd.extend(["-http_proxy", active_proxy])
@@ -159,7 +165,7 @@ def run_ffmpeg_loop():
                 "-i", url
             ])
             
-        # Sizin yazdığınız meşhur haritalama döngüsü
+        # Sizin enumerate haritalama döngünüz
         for idx, track_name in enumerate(track_mappings):
             ffmpeg_cmd.extend([
                 "-map", f"{idx}:v?", "-map", f"{idx}:a?", "-c", "copy",
@@ -170,23 +176,25 @@ def run_ffmpeg_loop():
 
         try:
             ffmpeg_process = subprocess.Popen(ffmpeg_cmd)
-            print(f"[FFMPEG] Yayına başlandı. PID: {ffmpeg_process.pid}")
+            print(f"[FFMPEG] Canlı kopyalama başlatıldı. PID: {ffmpeg_process.pid}")
             
-            # Expire süresini saniye saniye izleyen motor
+            # 🧠 EXPIRE SÜRESİNİ HESAPLAYAN SANİYELİK MOTOR
             while True:
                 if ffmpeg_process.poll() is not None:
-                    print("[FFMPEG] Beklenmedik kesinti oluştu.")
+                    print("[FFMPEG] Süreç dış bir sebepten kapandı. Yeniden başlatılıyor...")
                     break
                 
+                # Kalan süreyi saniye cinsinden hesapla
                 kalan_saniye = int(token_expires_at - time.time())
                 
+                # Süre dolduysa (5 dakikalık emniyet payı geldiyse) döngüyü kır ve en başa dön
                 if kalan_saniye <= 0:
-                    print("[SÜRE DOLDU] Tokenların süresi bitti. Yenileniyor...")
-                    ffmpeg_process.terminate()
+                    print("[SÜRE DOLDU] Token expire zamanı geldi! Linkler yenileniyor...")
+                    ffmpeg_process.terminate()  # Eski FFmpeg'i kapat
                     ffmpeg_process.wait()
                     break
                 
-                time.sleep(1)
+                time.sleep(1)  # Hassas saniyelik takip mekanizması
                 
         except Exception as e:
             print(f"[FFMPEG HATA] Çalıştırma hatası: {e}")
@@ -195,6 +203,7 @@ def run_ffmpeg_loop():
 
 @app.on_event("startup")
 def startup_event():
+    """Konteyner açıldığı an otonom motoru arka planda ateşler."""
     thread = threading.Thread(target=run_ffmpeg_loop, daemon=True)
     thread.start()
 
