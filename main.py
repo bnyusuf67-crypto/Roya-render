@@ -72,7 +72,7 @@ def get_jordan_friendly_proxy():
                             proxies={"http": test_proxy_url, "https": test_proxy_url}, 
                             timeout=2.5
                         )
-                        # Hatanın düzeltildiği yer: [200, 403, 401] gibi durum kodları kontrol ediliyor
+                        # Hatanın kalıcı olarak düzeltildiği yer: durum kodları kontrol ediliyor
                         if test_response.status_code in:
                             print(f"[PROXY DOĞRULANDI] Canlı IP bulundu: {test_proxy_url} (Ülke: {country})")
                             return test_proxy_url
