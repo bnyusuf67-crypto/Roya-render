@@ -10,7 +10,7 @@ import requests
 
 app = FastAPI(title="Roya TV Smart FFmpeg Relay")
 
-# --- CORS AYARLARI (hls.js ve Tarayıcı Hatalarını Önler) ---
+# --- CORS AYARLARI ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -49,7 +49,6 @@ def get_jordan_friendly_proxy():
     
     for country in target_countries:
         try:
-            # Tam olarak belirttiğiniz timeout=3000 parametreli v2 API yapısı
             api_url = f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country={country}"
             response = requests.get(api_url, timeout=7)
             
@@ -57,7 +56,6 @@ def get_jordan_friendly_proxy():
                 proxies = response.text.strip().splitlines()
                 print(f"[PROXY TARAMA] {country} listesinden {len(proxies)} adet IP alındı. Doğrulama başlıyor...")
                 
-                # Listeden en hızlı ilk 15 proxy'yi hızlıca test et
                 for raw_proxy in proxies[:15]:
                     raw_proxy = raw_proxy.strip()
                     if not raw_proxy:
@@ -65,15 +63,14 @@ def get_jordan_friendly_proxy():
                         
                     test_proxy_url = f"http://{raw_proxy}" if not raw_proxy.startswith("http") else raw_proxy
                     
-                    # PROXY TEST ADIMI: Küçük bir timeout (2.5 sn) ile test isteği atıyoruz
                     try:
                         test_response = requests.get(
                             "https://roya-tv.com", 
                             proxies={"http": test_proxy_url, "https": test_proxy_url}, 
                             timeout=2.5
                         )
-                        # Hatanın kalıcı olarak düzeltildiği yer: durum kodları kontrol ediliyor
-                        if test_response.status_code in:
+                        # HATA VEREN KISIM BASİTLEŞTİRİLDİ: 200 veya 403 ise proxy canlıdır
+                        if test_response.status_code == 200 or test_response.status_code == 403:
                             print(f"[PROXY DOĞRULANDI] Canlı IP bulundu: {test_proxy_url} (Ülke: {country})")
                             return test_proxy_url
                     except Exception:
@@ -108,11 +105,9 @@ def get_single_channel_variants(api_url):
         r.raise_for_status()
         secured_url = r.json()["data"]["secured_url"]
 
-        # EXPIRE SÜRESİNİ OKUMA VE KAYDETME MECHANİSMASI
         url_expire = get_expire_time_from_url(secured_url)
         if token_expires_at == 0 or url_expire < token_expires_at:
-            # Emniyet payı: Linkler patlamadan tam 5 dakika (300 sn) önce yenilemeyi hedefler
-            token_expires_at = url_expire - 300
+            token_expires_at = url_expire - 300  # 5 dakika emniyet payı
 
         r = session.get(secured_url, timeout=10)
         r.raise_for_status()
@@ -144,7 +139,6 @@ def run_ffmpeg_loop():
         print("\n--- [YENİ PERİYOT BAŞLADI] ---")
         token_expires_at = 0
         
-        # BAE ve Mısır sayfalarından doğrulanmış proxy çekiliyor
         active_proxy = get_jordan_friendly_proxy()
         if active_proxy:
             session.proxies = {"http": active_proxy, "https": active_proxy}
@@ -154,7 +148,6 @@ def run_ffmpeg_loop():
         all_active_inputs = []
         track_mappings = []
 
-        # Tüm kanalları proxy arkasından güvenle tarayıp doldur
         for channel_key, api_url in CHANNELS.items():
             variants = get_single_channel_variants(api_url)
             for idx, (stream_info, variant_url) in enumerate(variants):
@@ -167,7 +160,6 @@ def run_ffmpeg_loop():
             time.sleep(10)
             continue
 
-        # FFmpeg komut dizisi inşası
         ffmpeg_cmd = ["ffmpeg", "-y"]
         
         for url in all_active_inputs:
@@ -178,7 +170,6 @@ def run_ffmpeg_loop():
                 "-i", url
             ])
             
-        # Sizin meşhur enumerate haritalama döngünüz
         for idx, track_name in enumerate(track_mappings):
             ffmpeg_cmd.extend([
                 "-map", f"{idx}:v?", "-map", f"{idx}:a?", "-c", "copy",
@@ -191,23 +182,20 @@ def run_ffmpeg_loop():
             ffmpeg_process = subprocess.Popen(ffmpeg_cmd)
             print(f"[FFMPEG] Canlı kopyalama başlatıldı. PID: {ffmpeg_process.pid}")
             
-            # EXPIRE SÜRESİNİ HESAPLAYAN SANİYELİK MOTOR
             while True:
                 if ffmpeg_process.poll() is not None:
                     print("[FFMPEG] Süreç dış bir sebepten kapandı. Yeniden başlatılıyor...")
                     break
                 
-                # Kalan süreyi saniye cinsinden hesapla
                 kalan_saniye = int(token_expires_at - time.time())
                 
-                # Süre dolduysa döngüyü kır ve en başa dön
                 if kalan_saniye <= 0:
                     print("[SÜRE DOLDU] Token expire zamanı geldi! Linkler yenileniyor...")
-                    ffmpeg_process.terminate()  # Eski FFmpeg'i kapat
+                    ffmpeg_process.terminate()
                     ffmpeg_process.wait()
                     break
                 
-                time.sleep(1)  # Hassas saniyelik takip mekanizması
+                time.sleep(1)
                 
         except Exception as e:
             print(f"[FFMPEG HATA] Çalıştırma hatası: {e}")
@@ -216,7 +204,6 @@ def run_ffmpeg_loop():
 
 @app.on_event("startup")
 def startup_event():
-    """Konteyner açıldığı an otonom motoru arka planda ateşler."""
     thread = threading.Thread(target=run_ffmpeg_loop, daemon=True)
     thread.start()
 
