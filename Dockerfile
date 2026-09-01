@@ -1,26 +1,25 @@
-# 1. Aşama: Resmi ve hafif Python imajını kullanıyoruz
+# 1. Aşama: Resmi ve güncel Python imajını taban alıyoruz
 FROM python:3.11-slim
 
-# 2. Aşama: Python'un çıktıları terminale anlık yazdırmasını sağlıyoruz (Log takibi için önemli)
+# 2. Aşama: Python loglarının terminalde anlık görünmesini sağlıyoruz (Render takibi için kritik)
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# 3. Aşama: Çalışma dizinini oluştur ve ayarla
+# 3. Aşama: Konteyner içindeki çalışma dizinini belirliyoruz
 WORKDIR /app
 
-# 4. Aşama: Sistem bağımlılıklarını güncelle ve temiz tut
+# 4. Aşama: FFmpeg ve derleme araçlarını linux sistemine kuruyoruz
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# 5. Aşama: Önce sadece requirements.txt dosyasını kopyala (Docker cache mekanizmasından yararlanmak için)
+# 5. Aşama: Python kütüphanelerini kopyalayıp yüklüyoruz
 COPY requirements.txt .
-
-# 6. Aşama: Gerekli Python kütüphanelerini yükle
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 7. Aşama: Proje kodlarını kopyala
+# 6. Aşama: Projenin tüm dosyalarını (main.py vb.) konteynere aktarıyoruz
 COPY . .
 
-# 8. Aşama: Render'ın dinamik port atamasını ($PORT) destekleyecek şekilde uygulamayı başlat
+# 7. Aşama: Render'ın atayacağı dinamik portu ($PORT) yakalayarak uygulamayı otomatik başlatıyoruz
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
